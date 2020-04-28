@@ -28,7 +28,7 @@ function block(func)
     end
 end
 
-function return_from(name, value=nothing)
+function return_from(name, value = nothing)
     throw(ReturnFromException(name, value))
 end
 
@@ -36,14 +36,15 @@ current_available_restarts = []
 
 function available_restart(name)
     global current_available_restarts
-    any(r->r[1] == name, current_available_restarts)
+    any(r -> r[1] == name, current_available_restarts)
 end
 
 function invoke_restart(name, args...)
     global current_available_restarts
-    i = findfirst(r->r[1] == name, current_available_restarts)
+    i = findfirst(r -> r[1] == name, current_available_restarts)
     func = current_available_restarts[i][2]
-    func(args...)
+    # func(args...)
+    return_from("exception_handler", func(args...))
 end
 
 function restart_bind(func, restarts...)
@@ -51,18 +52,15 @@ function restart_bind(func, restarts...)
     for r in restarts
         push!(current_available_restarts, r)
     end
-    result = nothing
-    try
-        result = func()
-    catch e
-        rethrow(e)
-    end
+
+    result = func()
 
     # nao corre porque rethrow
     # tmb é preciso depois no handler_bind
     for i in restarts
         pop!(current_available_restarts)
     end
+
     result
 end
 
@@ -72,19 +70,13 @@ function handler_bind(func, handlers...)
     try
         func()
     catch exception
-        for handler in handlers
-            if  exception isa handler[1]
-                return handler[2](exception)
+        return block() do exception_handler
+            for handler in handlers
+                if exception isa handler[1]
+                    handler[2](exception)
+                end
             end
+            rethrow(exception)
         end
-        rethrow(exception)
     end
 end
-
-# Signal Extension: idk
-
-# type SignalException <: Exception
-#    var::String
-# end
-
-# signal(msg) = throw(SignalException(msg))
