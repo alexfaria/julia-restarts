@@ -23,9 +23,8 @@ handler_bind(DivisionByZero => (c) -> println("I saw it too")) do
     end
 end
 
-
-mystery(n) = 1 + block("outer") do outer
-    1 + block("inner") do inner
+mystery(n) = 1 + block() do outer
+    1 + block() do inner
         1 + if n == 0
             return_from(inner, 1)
         elseif n == 1
@@ -104,4 +103,9 @@ end
 handler_bind(DivisionByZero => (c) -> invoke_restart(:return_value, 1)) do
     infinity()
 end
-#1
+# 1
+
+handler_bind(DivisionByZero => (c) -> invoke_restart(:just_do_it)) do
+    infinity()
+end
+# Inf
