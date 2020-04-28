@@ -13,12 +13,14 @@ struct ReturnFromException <: Exception
     expr
 end
 
-function block(func, name)
+function block(func)
+    name = nothing
     try
+        name = (Base.method_argnames(methods(func).ms[1])[2])
         func(name)
     catch e
         if e isa ReturnFromException
-            if  e.name == name
+            if Symbol(e.name) == name
                 return e.expr
             end
         end
