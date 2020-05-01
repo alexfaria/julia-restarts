@@ -35,6 +35,10 @@ mystery(n) = 1 + block() do outer
     end
 end
 
+mystery(0)
+mystery(1)
+mystery(2)
+
 block() do escape
     handler_bind(DivisionByZero => (c) -> (println("I saw it too");
     return_from(escape, "Done"))) do
@@ -62,9 +66,26 @@ reciprocal(value) =
     restart_bind(
         :return_zero => () -> 0,
         :return_value => identity,
-        :retry_using => reciprocal
+        :retry_using => reciprocal,
     ) do
         value == 0 ? error(DivisionByZero()) : 1 / value
+    end
+
+# outro exemplo
+reciprocal(value) =
+    restart_bind(
+        :return_zero => () -> 0,
+        :return_value => identity,
+        :retry_using => reciprocal,
+    ) do
+        r = 0
+        if value == 0
+            r = error(DivisionByZero()) + 100
+        else
+            r = value
+        end
+        println("Reciprocal of $(value) is $(r)")
+        r
     end
 
 handler_bind(DivisionByZero => (c) -> invoke_restart(:return_zero)) do
@@ -75,7 +96,7 @@ handler_bind(DivisionByZero => (c) -> invoke_restart(:return_value, 1)) do
     reciprocal(0)
 end
 
-handler_bind(DivisionByZero => (c)->invoke_restart(:retry_using, 10)) do
+handler_bind(DivisionByZero => (c) -> invoke_restart(:retry_using, 10)) do
     reciprocal(0)
 end
 
