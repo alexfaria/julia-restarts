@@ -10,19 +10,23 @@ import Base: error
 
 struct ReturnFromException <: Exception
     name
-    expr
+    value
 end
 
+current_available_restarts = []
+current_available_handlers = []
+current_block_id = 0
+
 function block(func)
-    name = nothing
+    global current_block_id
+    current_block_id += 1
+    name = current_block_id
+
     try
-        name = (Base.method_argnames(methods(func).ms[1])[2])
         func(name)
     catch e
-        if e isa ReturnFromException
-            if Symbol(e.name) == name
-                return e.expr
-            end
+        if e isa ReturnFromException && e.name == name
+            return e.value
         end
         rethrow(e)
     end
@@ -31,8 +35,6 @@ end
 function return_from(name, value = nothing)
     throw(ReturnFromException(name, value))
 end
-
-current_available_restarts = []
 
 function available_restart(name)
     global current_available_restarts
@@ -43,40 +45,52 @@ function invoke_restart(name, args...)
     global current_available_restarts
     i = findfirst(r -> r[1] == name, current_available_restarts)
     func = current_available_restarts[i][2]
-    # func(args...)
-    return_from("exception_handler", func(args...))
+    func(args...)
 end
 
 function restart_bind(func, restarts...)
     global current_available_restarts
-    for r in restarts
-        push!(current_available_restarts, r)
+    block() do rb_block
+        for r in restarts
+            # meter dentro de outra funcao que recebe rb_block
+            pushfirst!(current_available_restarts, (r[1] => (args...) -> return_from(rb_block, r[2](args...))))
+        end
+
+        try
+            func()
+        finally
+            for i in restarts
+                popfirst!(current_available_restarts)
+            end
+        end
     end
-
-    result = func()
-
-    # nao corre porque rethrow
-    # tmb é preciso depois no handler_bind
-    for i in restarts
-        pop!(current_available_restarts)
-    end
-
-    result
 end
 
-error(exception::Exception) = throw(exception)
+function error(exception::Exception)
+    global current_available_handlers
+
+    # procurar handlers
+    for handler_group in current_available_handlers
+        # só um por grupo, o primeiro
+        for handler in handler_group
+            if exception isa handler[1]
+                handler[2](exception)
+                break
+            end
+        end
+    end
+
+    throw(exception)
+end
 
 function handler_bind(func, handlers...)
+    global current_available_handlers
+
+    pushfirst!(current_available_handlers, handlers)
+
     try
         func()
-    catch exception
-        return block() do exception_handler
-            for handler in handlers
-                if exception isa handler[1]
-                    handler[2](exception)
-                end
-            end
-            rethrow(exception)
-        end
+    finally
+        popfirst!(current_available_handlers)
     end
 end
