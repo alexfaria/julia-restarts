@@ -130,3 +130,8 @@ handler_bind(DivisionByZero => (c) -> invoke_restart(:just_do_it)) do
     infinity()
 end
 # Inf
+
+@handler_case(reciprocal(0),
+            DivisionByZero => (c)->println("I saw a division by zero!"),
+            SomeOtherException => (c)->println("saw something else")
+            )
