@@ -131,7 +131,58 @@ handler_bind(DivisionByZero => (c) -> invoke_restart(:just_do_it)) do
 end
 # Inf
 
-@handler_case(reciprocal(0),
-            DivisionByZero => (c)->println("I saw a division by zero!"),
-            SomeOtherException => (c)->println("saw something else")
-            )
+@handler_case(
+    reciprocal(0),
+    DivisionByZero => (c) -> println("I saw a division by zero!"),
+)
+
+@handler_case(DivisionByZero => (c) -> println("I saw a division by zero!")) do
+    reciprocal(0)
+end
+
+struct TestingHandlerCase <: Exception end
+
+function nested_handler_case()
+    @handler_case(
+        reciprocal(0),
+        DivisionByZero => (c) -> println("I saw a division by zero!"),
+    )
+    error(TestingHandlerCase())
+end
+
+@handler_case(
+    nested_handler_case(),
+    TestingHandlerCase => (c) -> println("I saw TestingHandlerCase"),
+)
+
+
+struct LineEndLimit <: Exception end
+
+function print_line(str)
+    line_end = 5
+    col = 0
+
+    for i = 1:length(str)
+        print(str[i])
+
+        if col < line_end
+            col = col + 1
+        else
+            restart_bind(
+                :wrap => () -> (println(); col = 0),
+                :truncate => () -> (return),
+                :continue => () -> (col = col + 1),
+            ) do
+                error(LineEndLimit())
+            end
+        end
+    end
+    col
+end
+
+print_line("ola")
+print_line("0123456789")
+
+handler_bind(LineEndLimit => (c) -> invoke_restart(:continue)) do
+    print_line("0123456789")
+end
