@@ -16,10 +16,10 @@ macro handler_case(func, handlers...)
     let
         escape_block = Symbol("escape_block")
         for handler in handlers
-            push!(handler.args[3].args[2].args, :(return_from($(esc(escape_block)))))
+            push!(handler.args[3].args[2].args, :(return_from($(escape_block))))
         end
         quote
-            block() do $(esc(escape_block))
+            block() do $(escape_block)
                 handler_bind($(handlers...)) do
                     $func
                 end
