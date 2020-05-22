@@ -48,19 +48,13 @@ end
 
 # https://www.cs.cmu.edu/Groups/AI/html/cltl/clm/node341.html#SECTION003347000000000000000
 mutable struct Restart
-    restart
-    test
-    interactive
-    report
+    restart     # restart pair :return_zero => () -> 0
+    test        # test if the restart is available
+    interactive # function to get the parameters for the restart
+    report      # name of the restart that appears in the prompt
 
     function Restart(restart; test= ()->true, interactive=nothing, report=nothing)
-        # test = test == nothing ? ()->true  : test
-        test = test
-        if interactive == nothing
-            interactive = nothing
-        else
-            interactive = () -> readline()
-        end
+        interactive = interactive == nothing ? () -> readline() : interactive
         report = report == nothing ? string(name) : report
         new(restart, test, interactive, report)
     end
