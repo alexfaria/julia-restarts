@@ -44,8 +44,8 @@ macro handler_case(func, handlers...)
         end
 
         # hack in order to work with both macro calling syntax
-        # @handler_case(func, handlers...)
-        # @handler_case(handlers...) do func() end
+        # @handler_case(reciprocal(0), DivisionByZero => (c) -> println("zero!"))
+        # @handler_case(DivisionByZero => (c) -> println("zero!")) do reciprocal(0) end
         if func.head == :call
             handler_func = :(() -> begin $func end)
         end
@@ -53,6 +53,14 @@ macro handler_case(func, handlers...)
             block() do $(escape_block)
                 handler_bind($handler_func, $(handlers...))
             end
+        end
+    end
+end
+
+macro restart_case(func, restarts...)
+    let
+        quote
+            restart_bind($func, $(restarts...))
         end
     end
 end
