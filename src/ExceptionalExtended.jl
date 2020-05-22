@@ -36,14 +36,22 @@ end
 macro handler_case(func, handlers...)
     let
         escape_block = Symbol("escape_block")
+        handler_func = func
+
         for handler in handlers
-            push!(handler.args[3].args[2].args, :(return_from($(escape_block))))
+            handler_body = handler.args[3].args[2]
+            handler.args[3].args[2] = :(return_from($(escape_block), $handler_body))
+        end
+
+        # hack in order to work with both macro calling syntax
+        # @handler_case(func, handlers...)
+        # @handler_case(handlers...) do func() end
+        if func.head == :call
+            handler_func = :(() -> begin $func end)
         end
         quote
             block() do $(escape_block)
-                handler_bind($(handlers...)) do
-                    $func
-                end
+                handler_bind($handler_func, $(handlers...))
             end
         end
     end
