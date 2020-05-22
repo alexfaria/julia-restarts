@@ -78,13 +78,14 @@ function picking_interactive_restart_handler(exception)
             i += 1
         end
 
+        print("Pick: ")
         restart = readline()
         i = tryparse(Int, restart)
         restart = restarts[i]
 
         value = nothing
         if restart[2].r isa Restart && restart[2].r.interactive
-            println("Input parameters: ")
+            print("Input: ")
             value = Meta.parse(readline())
             invoke_restart(restart[1], value)
         else
@@ -98,7 +99,7 @@ function restart_bind(func, restarts::Restart...)
     block() do rb_block
 
         for r in restarts
-            # meter dentro de outra funcao que recebe rb_block
+            # wrap inside an anonymous function that captures the value of rb_block
             pushfirst!(current_available_restarts, (r.restart[1] => (args...) -> return_from(rb_block, r.restart[2](args...))))
         end
 

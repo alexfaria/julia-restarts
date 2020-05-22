@@ -1,0 +1,610 @@
+\documentclass{beamer}
+%
+% Choose how your presentation looks.
+%
+% For more themes, color themes and font themes, see:
+% http://deic.uab.es/~iblanes/beamer_gallery/index_by_theme.html
+%
+\mode<presentation>
+{
+  % \usetheme{boxes}        % or try Darmstadt, Madrid, Warsaw, ...
+  \usetheme{CambridgeUS}
+  \usecolortheme{dolphin} % or try albatross, beaver, crane, ...
+  \usefonttheme{structurebold}  % or try serif, structurebold, ...
+  % \setbeamertemplate{navigation symbols}{}
+  \setbeamertemplate{caption}[numbered]
+} 
+
+\usepackage[english]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage{inconsolata}
+\usepackage[T1]{fontenc}
+\usepackage{listings}
+\usepackage{fancyvrb}
+\usepackage{minted}
+
+\usepackage{verbatim}
+\makeatletter
+\def\verbatim@font{\scriptsize\ttfamily}
+\makeatother
+
+% https://tex.stackexchange.com/questions/460731/highlight-color-a-part-of-text-in-block-in-beamer
+\usepackage{soul}
+\makeatletter
+\let\HL\hl
+\renewcommand\hl{%
+  \let\set@color\beamerorig@set@color
+  \let\reset@color\beamerorig@reset@color
+  \HL}
+\makeatother
+
+\usepackage{jlcode}
+
+% basic font style
+
+\def\jlbasicfont{\ttfamily\tiny\selectfont}
+
+\lstdefinestyle{jlcodecolorstyle}{%
+    basicstyle={\loadcolors\color{jlstring}\jlbasicfont},
+    keywordstyle={[1]\color{jlkeyword}\bfseries},
+    keywordstyle={[2]\color{jlliteral}},
+    keywordstyle={[3]\color{jlbuiltin}},
+    keywordstyle={[4]\color{jlmacros}},
+    commentstyle={\color{jlcomment}},
+    stringstyle={\color{jlstring}},
+    identifierstyle={\color{jlbase}}
+}
+
+\title[Julia Restarts]{Beyond Exception Handling}
+\subtitle{Implementing restarts in Julia}
+% \author{Alexandre Faria 97005 \and Rafael Pinto 97153}
+%\institute{MEIC - PA 2019/2020}
+% \date{Date of Presentation}
+
+\author[Alexandre \& Rafael]{%
+  \texorpdfstring{%
+    \begin{columns}
+      \column{.5\linewidth}
+      \centering
+      Alexandre Faria \\ 97005
+      \column{.5\linewidth}
+      \centering
+      Rafael Pinto \\ 97153
+    \end{columns}
+ }
+ {Alexandre Faria, Rafael Pinto}
+}
+\institute[IST]{Instituto Superior Técnico}
+\date[May 2020]{May 2020}
+
+
+\begin{document}
+\begin{frame}
+  \titlepage
+\end{frame}
+
+% Uncomment these lines for an automatically generated outline.
+%\begin{frame}{Outline}
+%  \tableofcontents
+%\end{frame}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SLIDE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\section{Data Structures}
+\begin{frame}[fragile,t]{Data Structures and Global Variables}
+
+% \vskip 1cm
+
+\begin{itemize}
+  \item ReturnFromException is used to transfer control between return\_from to block
+  \item Handlers are stored in a global stack
+  \item A counter is used to keep block names unique
+  \item Group all the handlers from a handler\_bind form and store those groups as a list in current\_available\_handlers
+\end{itemize}
+
+\vfill
+
+\begin{lstlisting}[language=julia, style=jlcodestyle]
+# exception used in block and return_from
+struct ReturnFromException <: Exception
+    name    # block name
+    value   # return value
+end
+
+# global variables
+current_available_restarts = []     # stack of restarts
+current_available_handlers = []     # stack of handler groups
+current_block_id = 0                # block name counter
+\end{lstlisting}
+\end{frame}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SLIDE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\section{Handler Binding}
+
+\begin{frame}[fragile,t]{Handler Bind}
+
+\vfill
+
+\begin{enumerate}
+    \item Push handlers onto the start of the current\_available\_handlers stack
+    \item Call the function
+    \item Pop the handlers from the stack
+\end{enumerate}
+
+\vfill
+
+\begin{lstlisting}[language=julia, style=jlcodestyle]
+function handler_bind(func, handlers...)
+    global current_available_handlers
+
+    pushfirst!(current_available_handlers, handlers)
+
+    try
+        func()
+    finally
+        popfirst!(current_available_handlers)
+    end
+end
+\end{lstlisting}
+
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SLIDE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\section{Error Handling}
+
+\begin{frame}[fragile,t]{Error Handling}
+
+\vfill
+
+\begin{itemize}
+    \item The handler corresponding to the first matched exception is executed
+    \item Otherwise, the error is not caught and is thrown normally
+\end{itemize}
+
+\vfill
+
+\begin{lstlisting}[language=julia, style=jlcodestyle]
+function error(exception::Exception)
+    for handler_group in current_available_handlers
+        for handler in handler_group
+            if exception isa handler[1]
+                handler[2](exception)
+                break
+            end
+        end
+    end
+    throw(exception)
+end
+\end{lstlisting}
+
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SLIDE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\section{Block \& Return From}
+
+\begin{frame}[fragile,t]{Block}
+\begin{itemize}
+  \item Use the name in the exception to know which block is supposed to handle it
+  \item If this block doesnt match the name, propagate the exception upwards in the chain call to another block
+\end{itemize}
+\vfill
+\begin{lstlisting}[language=julia, style=jlcodestyle]
+function block(func)
+    global current_block_id
+    current_block_id += 1
+    name = current_block_id
+    try
+        func(name)
+    catch e
+        if e isa ReturnFromException && e.name == name
+            return e.value
+        end
+        rethrow(e)
+    end
+end
+\end{lstlisting}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SLIDE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+
+\begin{frame}[fragile,t]{Return From}
+\begin{itemize}
+  \item Throw a ReturnFromException exception with the block name and the value to return
+  \item The block form will use this information to gain the control flow and return 
+\end{itemize}
+\vfill
+\begin{lstlisting}[language=julia, style=jlcodestyle]
+function return_from(name, value = nothing)
+    throw(ReturnFromException(name, value))
+end
+\end{lstlisting}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SLIDE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Restart Binding}
+\begin{frame}[fragile,t]{Restart Binding}
+    
+\begin{itemize}
+    \item Before calling the function, we add each restart to the stack so that it's available later to be invoked
+    \item The context of execution is inserted into a block form and the name 'rb\_block' is passed into the restart function by wrapping it in an anonymous functions that capturesthe value of rb\_block
+\end{itemize}
+\vfill
+\begin{lstlisting}[language=julia, style=jlcodestyle]
+function restart_bind(func, restarts...)
+    block() do rb_block
+        for r in restarts
+            pushfirst!(current_available_restarts,
+                (r[1] => (args...) -> return_from(rb_block, r[2](args...))))
+        end
+        ...
+    end
+end
+\end{lstlisting}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SLIDE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{frame}[fragile,t]{Restart Binding}
+\begin{itemize}
+    \item After establishing the restarts, the execution can then be passed to the given function
+    \item Once the block gets the control of the execution back, the restarts established for that block must be removed
+    \item The finally block guarantees that the restarts are always removed from the stack, even if an exceptional situation occurs
+\end{itemize}
+\begin{lstlisting}[language=julia, style=jlcodestyle]
+function restart_bind(func, restarts...)
+    block() do rb_block
+        ...
+        try
+            func()
+        finally
+            for i in restarts
+                popfirst!(current_available_restarts)
+            end
+        ...
+\end{lstlisting}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SLIDE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Restarts}
+\begin{frame}[fragile,t]{Available Restarts}
+\begin{itemize}
+    \item The ability to know whether a restart is available is useful to conditionally invoke a restart
+    \item The function looks for any restart, with the given name, in the current available restarts
+    \item The current available restarts contains the restarts that were established along the call chain
+\end{itemize}
+\vfill
+\begin{lstlisting}[language=julia, style=jlcodestyle]
+function available_restart(name)
+    global current_available_restarts
+    any(r -> r[1] == name, current_available_restarts)
+end
+\end{lstlisting}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SLIDE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}[fragile,t]{Invoking Restarts}
+
+\begin{itemize}
+    \item In order to invoke a restart, the program evaluates if there are currently available restarts that match the name provided by the handler
+    \item If so, it will invoke the restart with the given arguments which will resume the execution in some pre-established point
+\end{itemize}
+\vfill
+\begin{lstlisting}[language=julia, style=jlcodestyle]
+function invoke_restart(name, args...)
+    global current_available_restarts
+    i = findfirst(r -> r[1] == name, current_available_restarts)
+    func = current_available_restarts[i][2]
+    func(args...)
+end
+\end{lstlisting}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SLIDE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Extensions}
+\begin{frame}[fragile,t]{Signal Extension}
+
+\begin{itemize}
+    \item The signal function is simply the error function except it doesn't throw the exception if there are no available handlers
+\end{itemize}
+\vfill
+\begin{lstlisting}[language=julia, style=jlcodestyle]
+function signal(exception::Exception)
+    global current_available_handlers
+
+    for handler_group in current_available_handlers
+        for handler in handler_group
+            if exception isa handler[1]
+                handler[2](exception)
+                break
+            end
+        end
+    end
+end
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile,t]{Handler Case Macro}
+
+\begin{itemize}
+    \item This macro wraps the handler in a block and return\_from form
+    %TODO: dizer aqui mais
+\end{itemize}
+\vfill
+\begin{lstlisting}[language=julia, style=jlcodestyle,]
+macro handler_case(func, handlers...)
+    let
+        escape_block = Symbol("escape_block")
+        handler_func = func
+
+        for handler in handlers
+            handler_body = handler.args[3].args[2]
+            handler.args[3].args[2] = :(return_from($(escape_block), $handler_body))
+        end
+
+# hack in order to work with two macro calling syntax
+# @handler_case(reciprocal(0), DivisionByZero => (c) -> println("zero!"))
+# @handler_case(DivisionByZero => (c) -> print("zero!")) do reciprocal(0) end
+        if func.head == :call
+            handler_func = :(() -> begin $func end)
+        end
+        quote
+            block() do $(escape_block)
+                handler_bind($handler_func, $(handlers...))
+            end
+        end
+    end
+end
+
+\end{lstlisting}
+\end{frame}
+
+
+\begin{frame}[fragile,t]{Restart Case Macro}
+
+\begin{itemize}
+    \item This macro simply calls restart\_bind since it's already in the same form as restart\_case
+\end{itemize}
+\vfill
+\begin{lstlisting}[language=julia, style=jlcodestyle,]
+macro restart_case(func, restarts...)
+    let
+        quote
+            restart_bind($func, $(restarts...))
+        end
+    end
+end
+\end{lstlisting}
+\end{frame}
+
+
+\section{Interactive Restarts}
+\begin{frame}[fragile,t]{Interactively Invoking a Restart}
+
+\begin{itemize}
+    \item Example of the interactive restarts extensions
+\end{itemize}
+\vfill
+
+\begin{lstlisting}[language=julia, style=jlcodestyle,]
+struct DivisionByZero <: Exception end
+
+reciprocal(value) =
+    restart_bind(
+        Restart(:return_zero => (args...) -> 0, report="Return Zero"),
+        Restart(:return_value => identity, report="Return Value",
+                                           interactive=true,
+                                           test = () -> false),
+        Restart(:retry_using => reciprocal, report="Retry with another value",
+                                            interactive=true)
+    ) do
+        value == 0 ? error(DivisionByZero()) : 1 / value
+    end
+\end{lstlisting}
+
+\end{frame}
+
+\begin{frame}[fragile,t]{Interactively Invoking a Restart}
+
+\begin{itemize}
+    \item Only the functions which 'test' returns true are shown
+    \item The user handling of restarts is only run when no handlers execute a non-local transfer control
+\end{itemize}
+\vfill
+
+\begin{lstlisting}[language=julia, style=jlcodestyle,]
+julia> reciprocal(0)
+
+#<DivisionByZero()>#
+ [Condition of type DivisionByZero]
+Restarts:
+ 1: [RETRY_USING] Retry with another parameter
+ 2: [RETURN_ZERO] Return Zero
+Pick: 2
+0
+\end{lstlisting}
+\end{frame}
+\begin{frame}[fragile,t]{Interactively Invoking a Restart}
+
+\begin{itemize}
+    \item Only the functions which 'test' returns true are shown
+    \item There's also the possibility to ask the user for input by setting 'interactive' to true
+    \item The 'interactive' variable was simplified to be easier to implement interactive restarting
+\end{itemize}
+\vfill
+
+\begin{lstlisting}[language=julia, style=jlcodestyle,]
+julia> reciprocal(0)
+
+#<DivisionByZero()>#
+ [Condition of type DivisionByZero]
+Restarts:
+ 1: [RETRY_USING] Retry with another parameter
+ 2: [RETURN_ZERO] Return Zero
+Pick: 1
+Input: 10
+0.1
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile,t]{Interactively Invoking a Restart}
+
+\begin{itemize}
+    \item Limited backwards compatibility with normal restarts
+    \item The interactive handling also works with normal restarts but no input is asked from the user, therefore it only works with restarts which take no parameters
+\end{itemize}
+\vfill
+
+\begin{lstlisting}[language=julia, style=jlcodestyle,]
+julia> reciprocal(0)
+
+#<DivisionByZero()>#
+ [Condition of type DivisionByZero]
+Restarts:
+ 1: [RETRY_USING] retry_using
+ 2: [RETURN_VALUE] return_value
+ 3: [RETURN_ZERO] return_zero
+Pick: 3
+0
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile,t]{Restart Struct}
+
+\begin{itemize}
+    \item This structure holds the values for an Extended Restart
+    \item This is used to be able to print the restart with a name, test if its available, and get input from the user
+\end{itemize}
+\vfill
+\begin{lstlisting}[language=julia, style=jlcodestyle,]
+mutable struct Restart
+    restart     # restart pair :return_zero => () -> 0
+    test        # test if the restart is available
+    interactive # simplified to be simply a boolean
+                # instead of a custom function that asks the user for parameters
+    report      # name of the restart that appears in the prompt
+
+    function Restart(restart; test= ()->true, interactive=false, report=nothing)
+        report = report == nothing ? string(name) : report
+        new(restart, test, interactive, report)
+    end
+end
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile,t]{Interactively Invoking a Restart}
+
+\begin{itemize}
+    \item This method is added to the global stack of handlers so that its the last to be reached
+    \item This method is only called if no handlers execute a non-local transfer of control
+    \item It searches for restarts in the global stack and prints them
+\end{itemize}
+\vfill
+
+\begin{lstlisting}[language=julia, style=jlcodestyle,]
+current_available_handlers = push!(current_available_handlers,
+                [Exception => (c) -> picking_interactive_restart_handler(c)])
+function picking_interactive_restart_handler(exception)
+    global current_available_restarts
+    restarts = filter(r -> (!(r[2].r isa Restart) ||
+                             (r[2].r isa Restart && r[2].r.test())),
+                        current_available_restarts)
+    if length(restarts) > 0
+        println()
+        println("#<$(exception)>#")
+        println(" [Condition of type $(typeof(exception))]")
+        println("Restarts:")
+        ...
+    end
+end
+\end{lstlisting}
+
+\end{frame}
+\begin{frame}[fragile,t]{Interactively Invoking a Restart}
+
+\begin{itemize}
+    \item The 'if' inside the for loop makes it 'backwards' compatible with non-extended restarts (:name => func)
+\end{itemize}
+\vfill
+
+\begin{lstlisting}[language=julia, style=jlcodestyle,]
+current_available_handlers = push!(current_available_handlers, [Exception => (c) -> picking_interactive_restart_handler(c)])
+function picking_interactive_restart_handler(exception)
+    ...
+    if length(restarts) > 0
+        ...
+        for r in restarts
+            if r[2].r isa Restart
+                println(" $(i): [$(uppercase(String(r[1])))] $(r[2].r.report)")
+            else
+                println(" $(i): [$(uppercase(String(r[1])))] $(r[1])")
+            end
+            i += 1
+        end
+        print("Pick: ")
+        restart = readline()
+        i = tryparse(Int, restart)
+        restart = restarts[i]
+        ...
+end
+\end{lstlisting}
+\end{frame}
+
+
+\begin{frame}[fragile,t]{Interactively Invoking a Restart}
+
+\begin{itemize}
+    \item It then selects the restart and uses invoke\_restart
+    \item Passing parameters to non-extended restarts was not implemented, nor was any type of type checking for parameters which would increase the complexity of this extension
+\end{itemize}
+\vfill
+
+\begin{lstlisting}[language=julia, style=jlcodestyle,]
+function picking_interactive_restart_handler(exception)
+    ...
+    if length(restarts) > 0
+        ...
+        value = nothing
+        if restart[2].r isa Restart && restart[2].r.interactive
+            print("Input: ")
+            value = Meta.parse(readline())
+            invoke_restart(restart[1], value)
+        else
+            invoke_restart(restart[1])
+        end
+    end
+end
+\end{lstlisting}
+\end{frame}
+
+\begin{frame}[fragile,t]{Interactively Invoking a Restart}
+
+\begin{itemize}
+    \item In order to support this, restart\_bind was also extended by adding another generic function which receives the new extended restarts
+    \item This was necessary in order to convert them into the normal, un-extended, pair format (:name => func)
+\end{itemize}
+\vfill
+
+\begin{lstlisting}[language=julia, style=jlcodestyle,]
+function restart_bind(func, restarts::Restart...)
+    global current_available_restarts
+    block() do rb_block
+        for r in restarts
+            # wrap inside an anonymous function that
+            # captures the value of rb_block
+            pushfirst!(current_available_restarts,
+               (r.restart[1] => (args...) -> return_from(rb_block,
+                                                    r.restart[2](args...))))
+        end
+        try
+            func()
+        finally
+            for i in restarts
+                popfirst!(current_available_restarts)
+            end
+end end end
+\end{lstlisting}
+\end{frame}
+
+\end{document}
