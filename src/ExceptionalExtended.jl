@@ -53,18 +53,16 @@ mutable struct Restart
     interactive # function to get the parameters for the restart
     report      # name of the restart that appears in the prompt
 
-    function Restart(restart; test= ()->true, interactive=nothing, report=nothing)
-        interactive = interactive == nothing ? () -> readline() : interactive
+    function Restart(restart; test= ()->true, interactive=false, report=nothing)
         report = report == nothing ? string(name) : report
         new(restart, test, interactive, report)
     end
 end
 
-current_available_interactive_restarts = []
 current_available_handlers = push!(current_available_handlers, [Exception => (c) -> picking_interactive_restart_handler(c)])
 function picking_interactive_restart_handler(exception)
     global current_available_restarts
-    restarts = filter(r -> (r[2].r isa Restart && r[2].r.test()), current_available_restarts)
+    restarts = filter(r -> (!(r[2].r isa Restart) || (r[2].r isa Restart && r[2].r.test())), current_available_restarts)
     if length(restarts) > 0
         println()
         println("#<$(exception)>#")
@@ -72,20 +70,26 @@ function picking_interactive_restart_handler(exception)
         println("Restarts:")
         i = 1
         for r in restarts
-            println(" $(i): [$(uppercase(String(r[1])))] $(r[2].r.report)")
+            if r[2].r isa Restart
+                println(" $(i): [$(uppercase(String(r[1])))] $(r[2].r.report)")
+            else
+                println(" $(i): [$(uppercase(String(r[1])))] $(r[1])")
+            end
             i += 1
         end
 
-        selected_restart = readline()
-        i = tryparse(Int, selected_restart)
-        selected_restart = restarts[i]
+        restart = readline()
+        i = tryparse(Int, restart)
+        restart = restarts[i]
 
         value = nothing
-        if selected_restart[2].r.interactive != nothing
+        if restart[2].r isa Restart && restart[2].r.interactive
             println("Input parameters: ")
-            value = Meta.parse(selected_restart[2].r.interactive())
+            value = Meta.parse(readline())
+            invoke_restart(restart[1], value)
+        else
+            invoke_restart(restart[1])
         end
-        invoke_restart(selected_restart[1], value)
     end
 end
 
@@ -97,7 +101,6 @@ function restart_bind(func, restarts::Restart...)
             # meter dentro de outra funcao que recebe rb_block
             pushfirst!(current_available_restarts, (r.restart[1] => (args...) -> return_from(rb_block, r.restart[2](args...))))
         end
-        pushfirst!(current_available_interactive_restarts, restarts)
 
         try
             func()
@@ -105,7 +108,6 @@ function restart_bind(func, restarts::Restart...)
             for i in restarts
                 popfirst!(current_available_restarts)
             end
-            popfirst!(current_available_interactive_restarts)
         end
     end
 end

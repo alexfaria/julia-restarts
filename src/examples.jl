@@ -2,7 +2,7 @@ struct DivisionByZero <: Exception end
 
 reciprocal(x) = x == 0 ? error(DivisionByZero()) : 1 / x
 
-reciprocal(10)
+reciprocal(10) # 0.1
 
 try
     reciprocal(0)
@@ -203,12 +203,11 @@ end
 
 struct DivisionByZero <: Exception end
 
-
 reciprocal(value) =
     restart_bind(
         Restart(:return_zero => (args...) -> 0, report="Return Zero"),
-        Restart(:return_value => identity, report="Return Value", interactive=()->readline()),
-        Restart(:retry_using => reciprocal, report="Retry with another parameter", interactive=()->readline())
+        Restart(:return_value => identity, report="Return Value", interactive=true, test=() -> false),
+        Restart(:retry_using => reciprocal, report="Retry with another parameter", interactive=true)
     ) do
         value == 0 ? error(DivisionByZero()) : 1 / value
     end
