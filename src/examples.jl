@@ -133,10 +133,10 @@ end
 
 @handler_case(
     reciprocal(0),
-    DivisionByZero => (c) -> println("I saw a division by zero!"),
+    DivisionByZero => (c) -> (println("I saw a division by zero!"); 10),
 )
 
-@handler_case(DivisionByZero => (c) -> println("I saw a division by zero!")) do
+@handler_case(DivisionByZero => (c) -> (println("I saw a division by zero!"); 10)) do
     reciprocal(0)
 end
 
@@ -155,29 +155,40 @@ end
     TestingHandlerCase => (c) -> println("I saw TestingHandlerCase"),
 )
 
+@handler_case(DivisionByZero => (c) -> invoke_restart(:return_value, 10)) do
+    @restart_case(
+                  :return_zero => () -> 0,
+                  :return_value => identity,
+                  :retry_using => reciprocal
+                  ) do
+                  reciprocal(0)
+              end
+end
 
 struct LineEndLimit <: Exception end
 
 function print_line(str)
-    line_end = 5
-    col = 0
+    block() do truncate
+        line_end = 5
+        col = 0
 
-    for i = 1:length(str)
-        print(str[i])
+        for i = 1:length(str)
+            print(str[i])
 
-        if col < line_end
-            col = col + 1
-        else
-            restart_bind(
-                :wrap => () -> (println(); col = 0),
-                :truncate => () -> (return),
-                :continue => () -> (col = col + 1),
-            ) do
-                error(LineEndLimit())
+            if col < line_end
+                col = col + 1
+            else
+                restart_bind(
+                    :wrap => () -> (println(); col = 0),
+                    :truncate => () -> (return_from(truncate, col)),
+                    :continue => () -> (col = col + 1),
+                ) do
+                    error(LineEndLimit())
+                end
             end
         end
+        col
     end
-    col
 end
 
 print_line("ola")
@@ -186,3 +197,32 @@ print_line("0123456789")
 handler_bind(LineEndLimit => (c) -> invoke_restart(:continue)) do
     print_line("0123456789")
 end
+
+
+## INTERACTIVE RESTART EXAMPLES
+
+struct DivisionByZero <: Exception end
+
+
+reciprocal(value) =
+    restart_bind(
+        Restart(:return_zero => (args...) -> 0, report="Return Zero"),
+        Restart(:return_value => identity, report="Return Value", interactive=()->readline()),
+        Restart(:retry_using => reciprocal, report="Retry with another parameter", interactive=()->readline())
+    ) do
+        value == 0 ? error(DivisionByZero()) : 1 / value
+    end
+
+reciprocal(value) =
+    restart_bind(
+        :return_zero => () -> 0,
+        :return_value => identity,
+        :retry_using => reciprocal,
+    ) do
+        value == 0 ? error(DivisionByZero()) : 1 / value
+    end
+
+handler_bind(DivisionByZero => (c) -> (println("Zero!"); invoke_restart(:return_zero))) do
+    reciprocal(0)
+end
+reciprocal(0)
