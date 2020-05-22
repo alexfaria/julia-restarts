@@ -1,11 +1,3 @@
-# block(func)
-# return_from(name, value=nothing)
-# available_restart(name)
-# invoke_restart(name, args...)
-# restart_bind(func, restarts...)
-# error(exception::Exception)
-# handler_bind(func, handlers...)
-
 import Base: error
 
 struct ReturnFromException <: Exception
@@ -52,7 +44,7 @@ function restart_bind(func, restarts...)
     global current_available_restarts
     block() do rb_block
         for r in restarts
-            # meter dentro de outra funcao que recebe rb_block
+            # wrap inside an anonymous function that captures the value of rb_block
             pushfirst!(current_available_restarts, (r[1] => (args...) -> return_from(rb_block, r[2](args...))))
         end
 
@@ -73,6 +65,7 @@ function error(exception::Exception)
     for handler_group in current_available_handlers
         # só um por grupo, o primeiro
         for handler in handler_group
+            # direct instance or else it is a direct instance of one subtype of that type
             if exception isa handler[1]
                 handler[2](exception)
                 break
