@@ -1,25 +1,3 @@
-current_available_handlers = []
-current_available_handlers = push!(current_available_handlers, [Exception => (c) -> restart_user_handler(c)])
-
-function restart_user_handler(exception)
-    global current_available_restarts
-    if length(current_available_restarts) > 0
-        println()
-        println("#<$(exception)>#")
-        println(" [Condition of type $(typeof(exception))]")
-        println("Restarts:")
-        i = 1
-        for restart in current_available_restarts
-            println(" $(i): [$(uppercase(String(restart[1])))] $(restart[1])")
-            i += 1
-        end
-
-        selected_restart = readline()
-        i = tryparse(Int, selected_restart)
-        invoke_restart(current_available_restarts[i][1])
-    end
-end
-
 function signal(exception::Exception)
     global current_available_handlers
 
@@ -61,6 +39,79 @@ macro restart_case(func, restarts...)
     let
         quote
             restart_bind($func, $(restarts...))
+        end
+    end
+end
+
+
+## INTERACTIVE RESTARTS
+
+# https://www.cs.cmu.edu/Groups/AI/html/cltl/clm/node341.html#SECTION003347000000000000000
+mutable struct Restart
+    restart
+    test
+    interactive
+    report
+
+    function Restart(restart; test= ()->true, interactive=nothing, report=nothing)
+        # test = test == nothing ? ()->true  : test
+        test = test
+        if interactive == nothing
+            interactive = nothing
+        else
+            interactive = () -> readline()
+        end
+        report = report == nothing ? string(name) : report
+        new(restart, test, interactive, report)
+    end
+end
+
+current_available_interactive_restarts = []
+current_available_handlers = push!(current_available_handlers, [Exception => (c) -> picking_interactive_restart_handler(c)])
+function picking_interactive_restart_handler(exception)
+    global current_available_restarts
+    restarts = filter(r -> (r[2].r isa Restart && r[2].r.test()), current_available_restarts)
+    if length(restarts) > 0
+        println()
+        println("#<$(exception)>#")
+        println(" [Condition of type $(typeof(exception))]")
+        println("Restarts:")
+        i = 1
+        for r in restarts
+            println(" $(i): [$(uppercase(String(r[1])))] $(r[2].r.report)")
+            i += 1
+        end
+
+        selected_restart = readline()
+        i = tryparse(Int, selected_restart)
+        selected_restart = restarts[i]
+
+        value = nothing
+        if selected_restart[2].r.interactive != nothing
+            println("Input parameters: ")
+            value = Meta.parse(selected_restart[2].r.interactive())
+        end
+        invoke_restart(selected_restart[1], value)
+    end
+end
+
+function restart_bind(func, restarts::Restart...)
+    global current_available_restarts
+    block() do rb_block
+
+        for r in restarts
+            # meter dentro de outra funcao que recebe rb_block
+            pushfirst!(current_available_restarts, (r.restart[1] => (args...) -> return_from(rb_block, r.restart[2](args...))))
+        end
+        pushfirst!(current_available_interactive_restarts, restarts)
+
+        try
+            func()
+        finally
+            for i in restarts
+                popfirst!(current_available_restarts)
+            end
+            popfirst!(current_available_interactive_restarts)
         end
     end
 end
